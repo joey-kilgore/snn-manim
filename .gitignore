@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# snn-manim
+# ---------------------------------------------------------------------------
+# rendered manim output
+/media/
+
+# local Claude Code state
+/.claude/
+
+# raw data: only the 3-group recording the scenes read is tracked
+*.zip
+/data/*
+!/data/CA3_0_0001_3_group_18/
+
+# sim-loader: only the loader + params the scoring scenes import are tracked
+/sim-loader/*
+!/sim-loader/networkParams.py
+!/sim-loader/scripts/
+/sim-loader/scripts/*
+!/sim-loader/scripts/simulation.py
+!/sim-loader/scripts/group.py
+!/sim-loader/scripts/synapse.py
