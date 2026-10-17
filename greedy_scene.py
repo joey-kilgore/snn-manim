@@ -18,10 +18,12 @@ and then animates only its own slice of the run:
     Clip7  remaining smaller blocks, then the final blocks pulled out
     Clip8  pack the blocks into one 25 x 25 crossbar tile
     Clip9  spikes -> read voltages -> current for a single block
+    GreedyFull    clips 1-8 as one ~1 min video, sampling sped up
     DefaultsCard  (extra) the real defaults from generate_hw_mappings.py
 
 Render:
     manim -ql greedy_scene.py Clip1 Clip2 Clip3 Clip4 Clip5 Clip6 Clip7 Clip8 Clip9
+    manim -ql greedy_scene.py GreedyFull           # clips 1-8 in one video
     manim -qh greedy_scene.py Clip1 ...            # 1080p
 """
 
@@ -142,6 +144,17 @@ class GreedyBase(Scene):
         self.events = self.res.events
         self.narrate = plan_narration(self.events)
         self.marks = clip_marks(self.events)
+
+    # ---------------------------------------------------------------- pacing
+    pace = 1.0                # multiplies every run_time and wait
+
+    def compile_animations(self, *args, **kwargs):
+        anims = super().compile_animations(*args, **kwargs)
+        if self.pace != 1:
+            # floor at one frame ourselves so manim doesn't warn on every step
+            for anim in anims:
+                anim.run_time = max(anim.run_time * self.pace, 1 / config.frame_rate)
+        return anims
 
     # ------------------------------------------------------------ geometry
     def cell_center(self, r, c):
@@ -550,6 +563,10 @@ class GreedyBase(Scene):
                      VGroup(*[self.cells[r][c].copy() for c in post for r in pre]), k)
                  for k, (pre, post) in zip(self.kernels, self.res.mappings)]
         self.play(LaggedStart(*moves, lag_ratio=0.12), run_time=4)
+        # the transforms leave each kernel in the scene on its own; hand them
+        # back to their layout so pack_tile can keep the whole group
+        self.remove(*self.kernels)
+        self.add(self.kernel_layout)
         self.wait(1.5)
 
     def start_pulled_out(self):
@@ -559,12 +576,12 @@ class GreedyBase(Scene):
         self.make_kernels()
         self.add(self.caption, self.kernel_layout)
 
+    # ------------------------------------------------- stand-alone sections
+    def clear(self, rt=0.8):
+        self.play(*[FadeOut(m) for m in self.mobjects], run_time=rt)
 
-# ============================================================== clip 1
-class Clip1(GreedyBase):
-    """Pre-synaptic -> post-synaptic neurons drawn as a block of connections."""
-
-    def construct(self):
+    def block_intro(self):
+        """Clip 1: pre/post neurons drawn as one block of connections."""
         cap = Text("A crossbar kernel wires a set of pre-synaptic neurons to a set "
                    "of post-synaptic neurons, all-to-all", font_size=26)
         cap.to_edge(UP, buff=0.5)
@@ -612,70 +629,8 @@ class Clip1(GreedyBase):
         self.play(FadeOut(cap), FadeIn(goal, shift=UP * 0.2))
         self.wait(2)
 
-
-# ============================================================== clips 2-7
-class Clip2(GreedyBase):
-    """Build the matrix and parameter display; first block placement."""
-
-    def construct(self):
-        a, b = self.marks["c2"]
-        self.build_workspace(animate=True)
-        self.play_events(a, b)
-        self.wait(1.5)
-
-
-class _ReplayClip(GreedyBase):
-    mark = None
-    fast = 0.5
-
-    def construct(self):
-        a, b = self.marks[self.mark]
-        self.build_workspace(animate=False, upto=a)
-        self.wait(0.5)
-        self.play_events(a, b, fast=self.fast)
-        self.after()
-        self.wait(1.5)
-
-    def after(self):
-        pass
-
-
-class Clip3(_ReplayClip):
-    """More placements, stopping at the first rejected block."""
-    mark = "c3"
-
-
-class Clip4(_ReplayClip):
-    """More rejections, until a block is finally accepted."""
-    mark = "c4"
-
-
-class Clip5(_ReplayClip):
-    """Continue until the 6th rejection in a row."""
-    mark = "c5"
-
-
-class Clip6(_ReplayClip):
-    """The failure budget is exhausted: the kernel shrinks."""
-    mark = "c6"
-
-
-class Clip7(_ReplayClip):
-    """Remaining smaller blocks, then the final blocks pulled out."""
-    mark = "c7"
-    fast = FAST
-
-    def after(self):
-        self.pull_out_blocks()
-
-
-# ============================================================== clip 8
-class Clip8(GreedyBase):
-    """Pack the chosen blocks into one 25 x 25 crossbar tile."""
-
-    def construct(self):
-        self.start_pulled_out()
-        self.wait(0.5)
+    def pack_tile(self):
+        """Clip 8: from the pulled-out kernels, pack them into one tile."""
         keep = (self.caption, self.kernel_layout)
         self.play(*[FadeOut(m) for m in self.mobjects
                     if all(m is not k for k in keep)], run_time=0.8)
@@ -726,15 +681,7 @@ class Clip8(GreedyBase):
         self.play(FadeIn(stats, shift=LEFT * 0.2))
         self.wait(2.5)
 
-
-# ============================================================== clip 9
-class Clip9(GreedyBase):
-    """Spikes set the input columns to read voltages; the block's devices
-    turn those voltages into a current summed on the post-synaptic row.
-    Shown at the block's real position inside the packed 25 x 25 tile: every
-    row and column outside the block is greyed out as disabled for this read."""
-
-    def construct(self):
+    def read_block(self):
         shapes = [(len(pre), len(post)) for pre, post in self.res.mappings]
         slots, used = first_fit(shapes)
         # prefer a wide block (more spikes to show), then the one with the
@@ -831,6 +778,122 @@ class Clip9(GreedyBase):
                       *[devs[a].animate.set_fill(EDGE) for a in active],
                       FadeOut(sum_lbl), run_time=0.5)
         self.wait(1)
+
+
+# ============================================================== clip 1
+class Clip1(GreedyBase):
+    """Pre-synaptic -> post-synaptic neurons drawn as a block of connections."""
+
+    def construct(self):
+        self.block_intro()
+
+
+# ============================================================== clips 2-7
+class Clip2(GreedyBase):
+    """Build the matrix and parameter display; first block placement."""
+
+    def construct(self):
+        a, b = self.marks["c2"]
+        self.build_workspace(animate=True)
+        self.play_events(a, b)
+        self.wait(1.5)
+
+
+class _ReplayClip(GreedyBase):
+    mark = None
+    fast = 0.5
+
+    def construct(self):
+        a, b = self.marks[self.mark]
+        self.build_workspace(animate=False, upto=a)
+        self.wait(0.5)
+        self.play_events(a, b, fast=self.fast)
+        self.after()
+        self.wait(1.5)
+
+    def after(self):
+        pass
+
+
+class Clip3(_ReplayClip):
+    """More placements, stopping at the first rejected block."""
+    mark = "c3"
+
+
+class Clip4(_ReplayClip):
+    """More rejections, until a block is finally accepted."""
+    mark = "c4"
+
+
+class Clip5(_ReplayClip):
+    """Continue until the 6th rejection in a row."""
+    mark = "c5"
+
+
+class Clip6(_ReplayClip):
+    """The failure budget is exhausted: the kernel shrinks."""
+    mark = "c6"
+
+
+class Clip7(_ReplayClip):
+    """Remaining smaller blocks, then the final blocks pulled out."""
+    mark = "c7"
+    fast = FAST
+
+    def after(self):
+        self.pull_out_blocks()
+
+
+# ============================================================== clip 8
+class Clip8(GreedyBase):
+    """Pack the chosen blocks into one 25 x 25 crossbar tile."""
+
+    def construct(self):
+        self.start_pulled_out()
+        self.wait(0.5)
+        self.pack_tile()
+
+
+# ============================================================== clip 9
+class Clip9(GreedyBase):
+    """Spikes set the input columns to read voltages; the block's devices
+    turn those voltages into a current summed on the post-synaptic row.
+    Shown at the block's real position inside the packed 25 x 25 tile: every
+    row and column outside the block is greyed out as disabled for this read."""
+
+    def construct(self):
+        self.read_block()
+
+
+# ============================================================== full run
+class GreedyFull(GreedyBase):
+    """Clips 1-8 as one continuous video (about a minute). The intro, build,
+    pull-out and packing play at normal speed; the random sampling of clips
+    2-7 runs straight through, accelerating from REPLAY_PACE_START on the
+    first proposal to REPLAY_PACE_END on the last. Clip 9's read is left out."""
+
+    PACE = {"c2": FAST, "c3": 0.5, "c4": 0.5, "c5": 0.5, "c6": 0.5, "c7": FAST}
+    REPLAY_PACE_START = 0.3   # run_time multiplier on the first event
+    REPLAY_PACE_END = 0.03    # ... and on the last; geometric ramp in between
+
+    def construct(self):
+        self.block_intro()
+        self.clear()
+
+        self.build_workspace(animate=True)
+        n = len(self.events) - 1
+        ratio = self.REPLAY_PACE_END / self.REPLAY_PACE_START
+        for mark, fast in self.PACE.items():
+            a, b = self.marks[mark]
+            for i in range(a, b):
+                self.pace = self.REPLAY_PACE_START * ratio ** (i / n)
+                self.play_events(i, i + 1, fast=fast)
+        self.pace = 1.0
+        self.wait(1.0)
+        self.pull_out_blocks()
+
+        self.wait(0.5)
+        self.pack_tile()
 
 
 # ============================================================== extra

@@ -19,9 +19,18 @@ activity_score_scene.py): raster -> per-subtype mean firing rate vs. target
 -> the Gaussian built for one subtype worked in full -> all three subtypes'
 curves and scores -> combined into F(N).
 
+Each clip is its own Scene so it can be dropped into a presentation. A clip
+rebuilds the exact state the previous clip ended on (instantly, no
+animation) and then animates only its own slice:
+
+    Clip1  raster -> per-subtype firing rate vs. target, as a bar chart
+    Clip2  the Gaussian score worked in full for one subtype (Pyramidal)
+    Clip3  every subtype's curve, combined into the firing rate score F(N)
+
 Render:
-    manim -pql firing_rate_score_scene.py FiringRateScore     # quick preview
+    manim -pql firing_rate_score_scene.py FiringRateScore     # quick preview, full video
     manim -pqh firing_rate_score_scene.py FiringRateScore     # 1080p
+    manim -pql firing_rate_score_scene.py Clip1 Clip2 Clip3   # the three clips separately
 """
 
 import os
@@ -30,7 +39,7 @@ import sys
 import numpy as np
 from manim import *
 
-from raster_scene import GROUPS, COLORS, MUTED, load_spikes, SPIKES_CSV, fit
+from raster_scene import GROUPS, COLORS, MUTED, load_spikes, SPIKES_CSV, fit, label
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "sim-loader"))
 from networkParams import getCA3FullScale
@@ -196,25 +205,32 @@ class FiringRateScore(Scene):
         self.max_rate = max(max(self.rate.values()), max(self.target.values())) * 1.1
 
     # -------------------------------------------------------------- chrome
-    def intro(self):
+    def intro(self, animate=True):
         self.title = crisp_text("Firing rate score", font_size=30, weight=BOLD).move_to(UP * TITLE_Y)
+        if not animate:
+            self.add(self.title)
+            return
         sub = crisp_text(f"CA3_0_0001_3_group_18  ·  mean firing rate over the final {WINDOW_MS} ms",
                          font_size=16, color=MUTED).next_to(self.title, DOWN, buff=0.12)
         self.play(FadeIn(self.title, shift=DOWN * 0.15), FadeIn(sub))
         self.wait(0.6)
         self.play(FadeOut(sub))
 
-    def set_caption(self, text_str):
+    def set_caption(self, text_str, animate=True):
         new_caption = fit(crisp_text(text_str, font_size=20, color=ACCENT), 11.6).move_to(UP * CAPTION_Y)
-        if hasattr(self, "caption"):
+        if not animate:
+            if hasattr(self, "caption"):
+                self.remove(self.caption)
+            self.add(new_caption)
+        elif hasattr(self, "caption"):
             self.play(ReplacementTransform(self.caption, new_caption), run_time=0.4)
         else:
             self.play(FadeIn(new_caption), run_time=0.4)
         self.caption = new_caption
 
     # --------------------------------------------------------------- raster
-    def section_raster(self):
-        self.set_caption(f"The last {WINDOW_MS} ms of the recording, by subtype")
+    def section_raster(self, animate=True):
+        self.set_caption(f"The last {WINDOW_MS} ms of the recording, by subtype", animate=animate)
         panel = Panel(FULL_BOX, (self.t_start, self.t_end), (0, self.total_neurons),
                      [(t, str(t)) for t in (self.t_start, (self.t_start + self.t_end) // 2, self.t_end)],
                      [], "Time (ms)", "Global Neuron ID")
@@ -235,13 +251,16 @@ class FiringRateScore(Scene):
 
         legend = VGroup(*[
             VGroup(Dot(radius=0.06, color=COLORS[g]),
-                  crisp_text(f"{g} ({self.n_rows[g]})", font_size=16, color=MUTED)).arrange(RIGHT, buff=0.1)
+                  crisp_text(f"{label(g)} ({self.n_rows[g]})", font_size=16, color=MUTED)).arrange(RIGHT, buff=0.1)
             for g in GROUPS
         ]).arrange(RIGHT, buff=0.5).next_to(panel.rect, UP, buff=0.12)
 
-        self.play(Create(panel.frame), Create(dividers), FadeIn(legend))
-        self.play(LaggedStart(*[FadeIn(d) for d in dots], lag_ratio=0.0006, run_time=1.8))
-        self.wait(0.6)
+        if animate:
+            self.play(Create(panel.frame), Create(dividers), FadeIn(legend))
+            self.play(LaggedStart(*[FadeIn(d) for d in dots], lag_ratio=0.0006, run_time=1.8))
+            self.wait(0.6)
+        else:
+            self.add(panel.frame, dividers, dots, legend)
 
         self.raster_group = VGroup(panel.frame, dividers, dots, legend)
 
@@ -254,18 +273,26 @@ class FiringRateScore(Scene):
         return Arrow([ARROW_X[0], THUMB_CENTER[1], 0], [ARROW_X[1], THUMB_CENTER[1], 0], buff=0,
                      color=ACCENT, stroke_width=5, max_tip_length_to_length_ratio=0.35)
 
-    def advance(self, finished):
+    def advance(self, finished, animate=True):
         """Shrink the finished graph into the side slot (cross-fading out the
         previous thumbnail) and point an arrow at where the next one goes."""
-        old = [FadeOut(m) for m in (getattr(self, "thumb", None), getattr(self, "arrow", None)) if m]
-        self.play(self.shrink_to_side(finished), *old, run_time=1.1)
+        old = [m for m in (getattr(self, "thumb", None), getattr(self, "arrow", None)) if m]
+        if not animate:
+            for m in old:
+                self.remove(m)
+            s = min(THUMB_W / finished.width, THUMB_H / finished.height)
+            finished.scale(s).move_to(THUMB_CENTER)
+            self.thumb, self.arrow = finished, self.side_arrow()
+            self.add(self.thumb, self.arrow)
+            return
+        self.play(self.shrink_to_side(finished), *[FadeOut(m) for m in old], run_time=1.1)
         self.thumb, self.arrow = finished, self.side_arrow()
         self.play(GrowArrow(self.arrow), run_time=0.5)
 
     # ---------------------------------------------------------- avg freq bars
-    def section_avg_freq(self):
-        self.set_caption("Average firing rate per subtype vs. the full-scale target")
-        self.advance(self.raster_group)
+    def section_avg_freq(self, animate=True):
+        self.set_caption("Average firing rate per subtype vs. the full-scale target", animate=animate)
+        self.advance(self.raster_group, animate=animate)
 
         left, bottom, right, top = MAIN_BOX
         label_w = 2.0
@@ -287,16 +314,17 @@ class FiringRateScore(Scene):
         axis_line = Line([axis_left, bottom, 0], [axis_right, bottom, 0], stroke_color=MUTED, stroke_width=1.3)
         axis_lbl = crisp_text("Firing rate (Hz)", font_size=15, color=MUTED).move_to(
             [(axis_left + axis_right) / 2, bottom - 0.55, 0])
-        self.play(Create(axis_line), FadeIn(axis_ticks), FadeIn(axis_lbl))
+        if animate:
+            self.play(Create(axis_line), FadeIn(axis_ticks), FadeIn(axis_lbl))
+        else:
+            self.add(axis_line, axis_ticks, axis_lbl)
 
         self.bar_rows = {}
         for i, g in enumerate(GROUPS):
             y = top - (i + 0.5) * row_h
-            name_lbl = VGroup(Dot(radius=0.07, color=COLORS[g]), crisp_text(g, font_size=18)) \
+            name_lbl = VGroup(Dot(radius=0.07, color=COLORS[g]), crisp_text(label(g), font_size=18)) \
                 .arrange(RIGHT, buff=0.1).move_to([left + label_w / 2, y, 0])
 
-            bar0 = Rectangle(width=0.001, height=bar_h, stroke_width=0, fill_color=COLORS[g], fill_opacity=0.85)
-            bar0.move_to([axis_left, y, 0], aligned_edge=LEFT)
             bar1 = Rectangle(width=max(x_of_rate(self.rate[g]) - axis_left, 0.001), height=bar_h,
                              stroke_width=0, fill_color=COLORS[g], fill_opacity=0.85)
             bar1.move_to([axis_left, y, 0], aligned_edge=LEFT)
@@ -312,13 +340,20 @@ class FiringRateScore(Scene):
             if target_lbl.get_right()[0] > axis_right:
                 target_lbl.next_to(target_tick, UP, buff=0.06).align_to(target_tick, RIGHT)
 
-            self.play(FadeIn(name_lbl), run_time=0.3)
-            self.add(bar0)
-            self.play(Transform(bar0, bar1), FadeIn(value_lbl), run_time=0.6)
-            self.play(Create(target_tick), FadeIn(target_lbl), run_time=0.4)
-            self.bar_rows[g] = VGroup(name_lbl, bar0, value_lbl, target_tick, target_lbl)
+            if animate:
+                bar0 = Rectangle(width=0.001, height=bar_h, stroke_width=0, fill_color=COLORS[g], fill_opacity=0.85)
+                bar0.move_to([axis_left, y, 0], aligned_edge=LEFT)
+                self.play(FadeIn(name_lbl), run_time=0.3)
+                self.add(bar0)
+                self.play(Transform(bar0, bar1), FadeIn(value_lbl), run_time=0.6)
+                self.play(Create(target_tick), FadeIn(target_lbl), run_time=0.4)
+                self.bar_rows[g] = VGroup(name_lbl, bar0, value_lbl, target_tick, target_lbl)
+            else:
+                self.add(name_lbl, bar1, value_lbl, target_tick, target_lbl)
+                self.bar_rows[g] = VGroup(name_lbl, bar1, value_lbl, target_tick, target_lbl)
 
-        self.wait(0.6)
+        if animate:
+            self.wait(0.6)
         self.bars_group = VGroup(axis_line, axis_ticks, axis_lbl, *self.bar_rows.values())
 
     # ------------------------------------------------------- gaussian, worked
@@ -326,10 +361,12 @@ class FiringRateScore(Scene):
         mu, sigma = self.target[g], self.sigma[g]
         return max(mu + 4 * sigma, self.rate[g] * 1.15, mu * 1.3)
 
-    def section_gaussian_worked(self):
-        self.set_caption("Score = a normalized Gaussian centered on the target, worked for Pyramidal")
-        self.advance(self.bars_group)
-        self.play(Indicate(self.bar_rows["Pyramidal"], color=ACCENT, scale_factor=1.08))
+    def section_gaussian_worked(self, animate=True):
+        if animate:
+            self.set_caption("Score = a normalized Gaussian centered on the target, worked for Pyramidal")
+        self.advance(self.bars_group, animate=animate)
+        if animate:
+            self.play(Indicate(self.bar_rows["Pyramidal"], color=ACCENT, scale_factor=1.08))
 
         g = "Pyramidal"
         mu, sigma = self.target[g], self.sigma[g]
@@ -338,15 +375,12 @@ class FiringRateScore(Scene):
                      nice_ticks(xmax), [(0, "0"), (0.5, "0.5"), (1.0, "1.0")],
                      "Firing rate (Hz)", "Normalized score")
         panel.build()
-        self.play(Create(panel.frame))
 
-        formula = crisp_text("PDF_norm(x) = exp( -(x - target)² / (2 · (0.1·target)²) )",
+        formula = crisp_text("Normalized score(x) = exp( -(x - target)² / (2 · (0.1·target)²) )",
                              font_size=18, color=ACCENT).next_to(panel.rect, UP, buff=0.08)
-        self.play(FadeIn(formula))
 
         xs = np.linspace(0, xmax, 300)
         curve = panel.curve(xs, norm_gauss(xs, mu, sigma), COLORS[g], width=3)
-        self.play(Create(curve), run_time=1.4)
 
         band = Rectangle(width=panel.x_of(mu + sigma) - panel.x_of(mu - sigma), height=panel.h,
                          stroke_width=0, fill_color=COLORS[g], fill_opacity=0.08)
@@ -356,8 +390,6 @@ class FiringRateScore(Scene):
         mu_lbl = crisp_text(f"target = {mu:.2f} Hz", font_size=15, color=COLORS[g]).next_to(mu_line, UP, buff=0.08)
         sigma_lbl = crisp_text(f"σ = 0.1 × target = {sigma:.3f} Hz", font_size=14, color=MUTED)
         sigma_lbl.move_to([panel.x_of(mu), panel.bottom - 0.75, 0])
-        self.play(FadeIn(band), Create(mu_line), FadeIn(mu_lbl), FadeIn(sigma_lbl))
-        self.wait(0.5)
 
         actual_x = panel.x_of(self.rate[g])
         actual_line = DashedLine([actual_x, panel.bottom, 0], [actual_x, panel.y_of(1.0), 0],
@@ -366,14 +398,25 @@ class FiringRateScore(Scene):
         actual_lbl.next_to(actual_line, UP, buff=0.08)
         if actual_lbl.get_right()[0] > panel.right:
             actual_lbl.align_to(panel.rect, RIGHT)
-        self.set_caption(f"Read the curve at the measured rate ({self.rate[g]:.2f} Hz)")
-        self.play(FadeOut(sigma_lbl), Create(actual_line), FadeIn(actual_lbl))
 
         score_dot = Dot(panel.c2p(self.rate[g], self.score[g]), radius=0.09, color=ACCENT)
-        score_lbl = crisp_text(f"F_Pyramidal = {self.score[g]:.3f}", font_size=20, weight=BOLD, color=ACCENT)
+        score_lbl = crisp_text(f"F({label(g)}) = {self.score[g]:.3f}", font_size=20, weight=BOLD, color=ACCENT)
         score_lbl.next_to(panel.rect, DOWN, buff=0.5)
-        self.play(FadeIn(score_dot, scale=0.5), FadeIn(score_lbl))
-        self.wait(0.8)
+
+        if animate:
+            self.play(Create(panel.frame))
+            self.play(FadeIn(formula))
+            self.play(Create(curve), run_time=1.4)
+            self.play(FadeIn(band), Create(mu_line), FadeIn(mu_lbl), FadeIn(sigma_lbl))
+            self.wait(0.5)
+            self.set_caption(f"Read the curve at the measured rate ({self.rate[g]:.2f} Hz)")
+            self.play(FadeOut(sigma_lbl), Create(actual_line), FadeIn(actual_lbl))
+            self.play(FadeIn(score_dot, scale=0.5), FadeIn(score_lbl))
+            self.wait(0.8)
+        else:
+            self.set_caption(f"Read the curve at the measured rate ({self.rate[g]:.2f} Hz)", animate=False)
+            self.add(panel.frame, formula, curve, band, mu_line, mu_lbl, actual_line, actual_lbl,
+                     score_dot, score_lbl)
 
         self.worked = dict(frame=panel.frame, curve=curve, mu_line=mu_line, actual_line=actual_line,
                            dot=score_dot, score_lbl=score_lbl)
@@ -397,7 +440,7 @@ class FiringRateScore(Scene):
         readout = crisp_text(f"target {mu:.2f} · measured {self.rate[g]:.2f}", font_size=12, color=MUTED)
         return dict(
             frame=panel.frame,
-            title=crisp_text(g, font_size=17, weight=BOLD, color=COLORS[g]).next_to(panel.rect, UP, buff=0.08),
+            title=crisp_text(label(g), font_size=17, weight=BOLD, color=COLORS[g]).next_to(panel.rect, UP, buff=0.08),
             curve=panel.curve(xs, norm_gauss(xs, mu, sigma), COLORS[g], width=2.5),
             mu_line=DashedLine([panel.x_of(mu), panel.bottom, 0], [panel.x_of(mu), panel.y_of(1.0), 0],
                                stroke_color=COLORS[g], stroke_width=1.6, dash_length=0.05),
@@ -406,7 +449,7 @@ class FiringRateScore(Scene):
                                    stroke_color=MUTED, stroke_width=1.6, dash_length=0.05),
             dot=Dot(panel.c2p(self.rate[g], self.score[g]), radius=0.07, color=ACCENT),
             readout=readout.move_to([cx, READOUT_ROW_Y, 0]),
-            score_lbl=crisp_text(f"F_{g} = {self.score[g]:.3f}", font_size=18, weight=BOLD,
+            score_lbl=crisp_text(f"F({label(g)}) = {self.score[g]:.3f}", font_size=18, weight=BOLD,
                                  color=ACCENT).move_to([cx, SCORE_ROW_Y, 0]),
         )
 
@@ -447,3 +490,40 @@ class FiringRateScore(Scene):
 
         self.play(FadeIn(summary), *[Flash(self.mini_dots[g], color=ACCENT, flash_radius=0.22) for g in GROUPS])
         self.wait(3)
+
+
+# ============================================================== clips 1-3
+class Clip1(FiringRateScore):
+    """Raster -> per-subtype firing rate vs. target, as a bar chart."""
+
+    def construct(self):
+        self.prepare_data()
+        self.intro()
+        self.section_raster()
+        self.section_avg_freq()
+        self.wait(1)
+
+
+class Clip2(FiringRateScore):
+    """The Gaussian score worked in full for one subtype (Pyramidal)."""
+
+    def construct(self):
+        self.prepare_data()
+        self.intro(animate=False)
+        self.section_raster(animate=False)
+        self.section_avg_freq(animate=False)
+        self.section_gaussian_worked()
+        self.wait(1)
+
+
+class Clip3(FiringRateScore):
+    """Every subtype's curve, combined into the firing rate score F(N)."""
+
+    def construct(self):
+        self.prepare_data()
+        self.intro(animate=False)
+        self.section_raster(animate=False)
+        self.section_avg_freq(animate=False)
+        self.section_gaussian_worked(animate=False)
+        self.section_all_subtypes()
+        self.finale()

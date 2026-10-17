@@ -22,12 +22,16 @@ running fraction/score and where that score sits on the A(N) curve.
 Render:
     manim -pql activity_score_scene.py ActivityScore     # quick preview
     manim -pqh activity_score_scene.py ActivityScore     # 1080p
+
+Split into two clips (clip 1 ends as the first cell is highlighted as
+active; clip 2 opens on that same frame and runs to the end):
+    manim -pqh activity_score_scene.py ActivityScoreClip1 ActivityScoreClip2
 """
 
 import numpy as np
 from manim import *
 
-from raster_scene import GROUPS, COLORS, MUTED, load_spikes, SPIKES_CSV, fit
+from raster_scene import GROUPS, COLORS, MUTED, load_spikes, SPIKES_CSV, fit, label
 
 config.background_color = WHITE
 
@@ -45,22 +49,22 @@ CURVE_COLOR = BLUE_E
 # Layout (frame: x in [-7.11, 7.11], y in [-4, 4])
 # ---------------------------------------------------------------------------
 RASTER_LEFT, RASTER_RIGHT = -7.0, -0.5
-RASTER_TOP, RASTER_BOTTOM = 2.75, -3.3
+RASTER_TOP, RASTER_BOTTOM = 2.4, -3.0
 
 RIGHT_LEFT, RIGHT_RIGHT = -0.05, 6.95
 
 GRID_LABEL_W = 1.0
-GRID_TOP, GRID_BOTTOM = 2.75, 1.65
+GRID_TOP, GRID_BOTTOM = 2.4, 1.3
 GRID_LEFT = RIGHT_LEFT + GRID_LABEL_W
 GRID_RIGHT = RIGHT_RIGHT
 
 PANEL_CX = (RIGHT_LEFT + RIGHT_RIGHT) / 2
 STAT_CX = (GRID_LEFT + GRID_RIGHT) / 2
-STAT_Y = [0.9, 0.45, 0.0]
-MSG_Y = -0.35
+STAT_Y = [0.5, 0.1, -0.3]
+MSG_Y = -0.75
 
-PLOT_SIDE = 2.5
-PLOT_X0, PLOT_Y0 = PANEL_CX - PLOT_SIDE / 2, -3.15
+PLOT_SIDE = 1.85
+PLOT_X0, PLOT_Y0 = PANEL_CX - PLOT_SIDE / 2, -3.0
 
 # grid rows top -> bottom mirror the raster's bottom -> top group stacking
 GRID_ROWS = list(reversed(GROUPS))
@@ -93,7 +97,11 @@ def compute_bins(spikes, t_start):
 
 
 class ActivityScore(Scene):
+    CLIP = None   # None = whole scene; 1 / 2 = before / after the first highlighted cell
+
     def construct(self):
+        if self.CLIP == 2:
+            self.next_section("setup", skip_animations=True)
         self.spikes, self.t_start, self.t_end, self.n_rows, self.offsets, self.total_neurons = load_window()
         self.S = compute_bins(self.spikes, self.t_start)
 
@@ -156,17 +164,16 @@ class ActivityScore(Scene):
         tick_ts = (self.t_start, (self.t_start + self.t_end) // 2, self.t_end)
         tick_edges = (LEFT, None, RIGHT)
         time_ticks = VGroup(*[
-            Text(f"{t}", font_size=30, color=MUTED).move_to(
-                [self.x_of(t), RASTER_BOTTOM - 0.55, 0], aligned_edge=(edge if edge is not None else ORIGIN)
-            ).scale(0.5)
+            Text(f"{t}", font_size=30, color=MUTED).scale(0.5).move_to(
+                [self.x_of(t), RASTER_BOTTOM - 0.4, 0], aligned_edge=(edge if edge is not None else ORIGIN)
+            )
             for t, edge in zip(tick_ts, tick_edges)
         ])
-        time_lbl = Text("Time (ms) · final 1000 ms of the run", font_size=32, color=MUTED)
-        time_lbl.next_to(time_ticks, DOWN, buff=0.12)
-        time_lbl.scale(0.5)
+        time_lbl = Text("Time (ms) · final 1000 ms of the run", font_size=32, color=MUTED).scale(0.5)
+        time_lbl.next_to(time_ticks, DOWN, buff=0.08)
 
         legend = VGroup(*[
-            VGroup(Dot(radius=0.05, color=COLORS[g]), Text(g, font_size=28, color=MUTED).scale(0.5))
+            VGroup(Dot(radius=0.05, color=COLORS[g]), Text(label(g), font_size=28, color=MUTED).scale(0.5))
             .arrange(RIGHT, buff=0.06)
             for g in GROUPS
         ]).arrange(RIGHT, buff=0.3).next_to(self.raster_box, UP, buff=0.1)
@@ -213,7 +220,7 @@ class ActivityScore(Scene):
         ] for r in range(len(GRID_ROWS))]
 
         row_labels = VGroup(*[
-            Text(g, font_size=28, color=COLORS[g]).move_to([RIGHT_LEFT + GRID_LABEL_W / 2 - 0.05,
+            Text(label(g), font_size=28, color=COLORS[g]).move_to([RIGHT_LEFT + GRID_LABEL_W / 2 - 0.05,
                                                              GRID_TOP - (r + 0.5) * row_h, 0]).scale(0.5)
             for r, g in enumerate(GRID_ROWS)
         ])
@@ -248,15 +255,14 @@ class ActivityScore(Scene):
         curve.set_points_smoothly(pts)
         x_axis = Line(self.plot_of(0, 0), self.plot_of(1, 0), stroke_color=MUTED, stroke_width=1.5)
         y_axis = Line(self.plot_of(0, 0), self.plot_of(0, 1), stroke_color=MUTED, stroke_width=1.5)
-        x_lbl = Text("fraction of active cells", font_size=28, color=MUTED)
-        x_lbl.next_to(x_axis, DOWN, buff=0.1)
-        x_lbl.scale(0.5)
-        y_lbl = Text("A(N)", font_size=28, color=MUTED).rotate(PI / 2).next_to(y_axis, LEFT, buff=0.1).scale(0.5)
+        x_lbl = Text("fraction of active cells", font_size=28, color=MUTED).scale(0.5)
+        x_lbl.next_to(x_axis, DOWN, buff=0.3)
+        y_lbl = Text("A(N)", font_size=28, color=MUTED).scale(0.5).rotate(PI / 2).next_to(y_axis, LEFT, buff=0.1)
         end_lbls = VGroup(*[
-            Text(s, font_size=26, color=MUTED).next_to(self.plot_of(x, 0), DOWN, buff=0.08).scale(0.5)
+            Text(s, font_size=26, color=MUTED).scale(0.5).next_to(self.plot_of(x, 0), DOWN, buff=0.08)
             for s, x in (("0", 0), ("1", 1))
         ])
-        y_end = Text("1", font_size=26, color=MUTED).next_to(self.plot_of(0, 1), LEFT, buff=0.08).scale(0.5)
+        y_end = Text("1", font_size=26, color=MUTED).scale(0.5).next_to(self.plot_of(0, 1), LEFT, buff=0.08)
 
         self.frac_tracker = ValueTracker(0)
         self.score_dot = always_redraw(lambda: Dot(
@@ -287,6 +293,7 @@ class ActivityScore(Scene):
     def count_bins(self):
         count = 0
         slow_done = 0
+        first = True
         for g in GROUPS:
             bins = list(range(N_BINS))
             slow_bins = []
@@ -305,6 +312,9 @@ class ActivityScore(Scene):
                 verdict.scale(0.5)
                 self.play(FadeIn(hi), run_time=0.35)
                 self.play(FadeIn(verdict), run_time=0.3)
+                if first:
+                    self.clip_break()
+                    first = False
                 count += int(active)
                 self.play(cell.animate.set_fill(COLORS[g] if active else ACTIVE_INACTIVE, opacity=1),
                           FadeOut(hi), FadeOut(verdict), *self.update_stats(count), run_time=0.45)
@@ -324,6 +334,13 @@ class ActivityScore(Scene):
 
         self.final_count = count
 
+    def clip_break(self):
+        """Cut between clip 1 and clip 2: the first cell is highlighted with its verdict."""
+        if self.CLIP == 1:
+            self.next_section("rest", skip_animations=True)
+        elif self.CLIP == 2:
+            self.next_section("clip2")
+
     def finale(self):
         frac = self.final_count / TOTAL_CELLS
         score = frac ** 2
@@ -335,7 +352,15 @@ class ActivityScore(Scene):
             Text(msg, font_size=44, weight=BOLD, color=HILITE).scale(0.5),
         ).arrange(DOWN, buff=0.15)
         fit(summary, RIGHT_RIGHT - RIGHT_LEFT - 0.4)
-        summary.move_to([PANEL_CX, PLOT_Y0 - 0.55, 0])
+        summary.move_to([PANEL_CX, PLOT_Y0 - 0.75, 0])
         self.play(FadeIn(summary), Indicate(self.score_lbl, color=HILITE, scale_factor=1.15),
                   Flash(self.score_dot, color=HILITE, flash_radius=0.25))
         self.wait(3)
+
+
+class ActivityScoreClip1(ActivityScore):
+    CLIP = 1
+
+
+class ActivityScoreClip2(ActivityScore):
+    CLIP = 2

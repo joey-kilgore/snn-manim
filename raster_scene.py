@@ -79,6 +79,11 @@ def fit(mob, width):
     return mob
 
 
+def label(g):
+    """Display name for a subtype key (MFA_ORDEN -> MFA ORDEN)."""
+    return g.replace("_", " ")
+
+
 def nice_row_ticks(n, target=5):
     """Round tick step (10/20/25/40/50/100/200/...) giving ~`target` ticks
     from 0 up to (but not necessarily including) n."""
@@ -216,7 +221,7 @@ class RasterReveal(Scene):
 
         legend = VGroup(*[
             VGroup(Dot(radius=0.07, color=COLORS[g]),
-                  Text(f"{g} ({n_rows[g]})", font_size=17, color=MUTED)).arrange(RIGHT, buff=0.1)
+                  Text(f"{label(g)} ({n_rows[g]})", font_size=17, color=MUTED)).arrange(RIGHT, buff=0.1)
             for g in GROUPS
         ]).arrange(RIGHT, buff=0.5).move_to([0, LEGEND_Y, 0])
 

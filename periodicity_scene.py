@@ -35,6 +35,13 @@ paper's Supp. Fig. 2) before the oscillation bands are scored.
 Render:
     manim -pql periodicity_scene.py PeriodicityScore     # quick preview
     manim -pqh periodicity_scene.py PeriodicityScore     # 1080p
+
+Clips (same content, split at two points; each clip rebuilds the previous
+clip's final frame instantly before animating its own slice):
+    Clip1  title, trace, and the FFT PSD shown on the bottom panel
+    Clip2  smoothing, linear -> log-log, and the best-fit line
+    Clip3  the ratio scan, band scoring, and P(N)
+    manim -pql periodicity_scene.py Clip1 Clip2 Clip3
 """
 
 import numpy as np
@@ -245,7 +252,8 @@ class PeriodicityScore(Scene):
         self.prepare_data()
         self.intro()
         self.section_trace()
-        self.section_fft()
+        self.section_fft_psd()
+        self.section_smooth()
         self.section_loglog()
         self.section_fit()
         self.section_ratio_scan()
@@ -318,8 +326,11 @@ class PeriodicityScore(Scene):
         self.wait(0.6)
         self.play(FadeOut(sub))
 
+    def make_caption(self, text_str):
+        return fit(crisp_text(text_str, font_size=20, color=ACCENT), 11.6).move_to(UP * CAPTION_Y)
+
     def set_caption(self, text_str):
-        new_caption = fit(crisp_text(text_str, font_size=20, color=ACCENT), 11.6).move_to(UP * CAPTION_Y)
+        new_caption = self.make_caption(text_str)
         if hasattr(self, "caption"):
             self.play(ReplacementTransform(self.caption, new_caption), run_time=0.4)
         else:
@@ -347,7 +358,7 @@ class PeriodicityScore(Scene):
         self.trace, self.trace_curve = panel, curve
 
     # ------------------------------------------- 2-3. |FFT|^2 -> linear PSD
-    def section_fft(self):
+    def section_fft_psd(self):
         top = self.trace_panel(TOP_BOX)
         top.build()
         top_curve = top.curve(self.ms, self.v, TRACE_COLOR)
@@ -363,7 +374,13 @@ class PeriodicityScore(Scene):
         psd_curve = psd.curve(self.freqs, self.power_raw, TRACE_COLOR, 2.0)
         self.show_panel(psd, psd_curve)
         self.wait(0.6)
+        self.top, self.top_curve, self.arrow, self.arrow_lbl = top, top_curve, arrow, arrow_lbl
+        self.psd, self.psd_curve = psd, psd_curve
 
+    # ------------------------------------- 3. PSD moves to full, then smoothed
+    def section_smooth(self):
+        top, top_curve, arrow, arrow_lbl = self.top, self.top_curve, self.arrow, self.arrow_lbl
+        psd, psd_curve = self.psd, self.psd_curve
         self.play(FadeOut(top.frame), FadeOut(top_curve), FadeOut(arrow), FadeOut(arrow_lbl))
         full = self.linear_psd_panel(FULL_BOX)
         full.build()
@@ -640,3 +657,67 @@ class PeriodicityScore(Scene):
         self.play(FadeIn(summary),
                   *[Flash(d, color=c, flash_radius=0.25) for d, (_, _, _, c) in zip(self.peak_dots, RANGE_DEFS)])
         self.wait(3)
+
+
+# ---------------------------------------------------------------------------
+# Clips. Each one starts from the frame the previous clip ended on, built
+# instantly with self.add so no animation is repeated.
+# ---------------------------------------------------------------------------
+class Clip1(PeriodicityScore):
+    """Title, the trace, and the |FFT|^2 PSD shown on the bottom panel."""
+
+    def construct(self):
+        self.prepare_data()
+        self.intro()
+        self.section_trace()
+        self.section_fft_psd()
+
+
+class Clip2(PeriodicityScore):
+    """Smoothing, the linear -> log-log switch, and the best-fit line."""
+
+    def restore_fft_state(self):
+        self.title = crisp_text("Periodicity score", font_size=30, weight=BOLD).move_to(UP * TITLE_Y)
+        self.caption = self.make_caption("Fourier transform: power spectral density = |FFT|²")
+
+        top = self.trace_panel(TOP_BOX)
+        top.build()
+        top_curve = top.curve(self.ms, self.v, TRACE_COLOR)
+        arrow, arrow_lbl = self.down_arrow("|FFT|²")
+        psd = self.linear_psd_panel(BOTTOM_BOX)
+        psd.build()
+        psd_curve = psd.curve(self.freqs, self.power_raw, TRACE_COLOR, 2.0)
+
+        self.add(self.title, self.caption, top.frame, top_curve, arrow, arrow_lbl, psd.frame, psd_curve)
+        self.top, self.top_curve, self.arrow, self.arrow_lbl = top, top_curve, arrow, arrow_lbl
+        self.psd, self.psd_curve = psd, psd_curve
+
+    def construct(self):
+        self.prepare_data()
+        self.restore_fft_state()
+        self.section_smooth()
+        self.section_loglog()
+        self.section_fit()
+
+
+class Clip3(PeriodicityScore):
+    """The ratio scan, band scoring, and the combined P(N)."""
+
+    def restore_fit_state(self):
+        self.title = crisp_text("Periodicity score", font_size=30, weight=BOLD).move_to(UP * TITLE_Y)
+        self.caption = self.make_caption("Linear regression in log-log space = baseline power at every frequency")
+
+        log = self.loglog_psd_panel(FULL_BOX)
+        log.build()
+        curve = log.curve(self.freqs, self.power, TRACE_COLOR, 2.0)
+        fit_line, fit_eq = self.fit_overlay(log)
+
+        self.add(self.title, self.caption, log.frame, curve, fit_line, fit_eq)
+        self.psd, self.psd_curve, self.fit_line, self.fit_eq = log, curve, fit_line, fit_eq
+
+    def construct(self):
+        self.prepare_data()
+        self.restore_fit_state()
+        self.section_ratio_scan()
+        self.section_bands()
+        self.finale()
